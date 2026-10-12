@@ -1,0 +1,155 @@
+import { Request, Response } from "express";
+
+import { productService } from "./product.service";
+import { PRODUCT_MESSAGES } from "./product.messages";
+import { syncService } from "../sync/sync.service";
+import { SyncJobAction } from "../sync/sync.types";
+
+import { asyncHandler } from "../../utils/asyncHandler";
+import { ApiResponse } from "../../utils/ApiResponse";
+
+import { HTTP_STATUS } from "../../shared/constants/http-status.constants";
+
+export const createProduct = asyncHandler(
+  async (req: Request, res: Response) => {
+    const product = await productService.create(req.body, { userId: String(req.user?._id) });
+
+    return res.status(HTTP_STATUS.CREATED).json(
+      new ApiResponse(
+        true,
+        PRODUCT_MESSAGES.CREATED,
+        product
+      )
+    );
+  }
+);
+
+export const getAllProducts = asyncHandler(
+  async (req: Request, res: Response) => {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+    const search = String(req.query.search || "");
+
+    const products = await productService.getAll(
+      page,
+      limit,
+      search,
+      String(req.user?._id)
+    );
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        PRODUCT_MESSAGES.FETCHED_ALL,
+        products
+      )
+    );
+  }
+);
+
+export const getProductById = asyncHandler(
+  async (req: Request, res: Response) => {
+    const product = await productService.getById(
+      String(req.params.id)
+      , String(req.user?._id)
+    );
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        PRODUCT_MESSAGES.FETCHED,
+        product
+      )
+    );
+  }
+);
+
+export const updateProduct = asyncHandler(
+  async (req: Request, res: Response) => {
+    const product = await productService.update(
+      String(req.params.id),
+      req.body,
+      { userId: String(req.user?._id) }
+    );
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        PRODUCT_MESSAGES.UPDATED,
+        product
+      )
+    );
+  }
+);
+
+export const deleteProduct = asyncHandler(
+  async (req: Request, res: Response) => {
+    await productService.delete(
+      String(req.params.id)
+      , { userId: String(req.user?._id) }
+    );
+
+    return res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        PRODUCT_MESSAGES.DELETED
+      )
+    );
+  }
+);
+
+export const syncProductChannels = asyncHandler(
+  async (req: Request, res: Response) => {
+    const productId = String(req.params.id);
+    const syncLogs = await syncService.enqueueSyncJobsForProduct(
+      productId,
+      SyncJobAction.UPDATE,
+      String(req.user?._id)
+    );
+
+    return res.status(HTTP_STATUS.ACCEPTED).json(
+      new ApiResponse(
+        true,
+        `Synchronization jobs queued for ${syncLogs.length} active channel mapping(s)`,
+        { enqueuedCount: syncLogs.length, syncLogs }
+      )
+    );
+  }
+);
+
+export const publishProductToChannels = asyncHandler(
+  async (req: Request, res: Response) => {
+    const productId = String(req.params.id);
+    const channels = Array.isArray(req.body?.channels) ? req.body.channels : [];
+    const integrationIds = channels.length
+      ? channels.map((channel: { integrationId?: string }) => String(channel.integrationId || "")).filter(Boolean)
+      : req.body?.integrationIds;
+    const channelValues = Object.fromEntries(
+      channels
+        .filter((channel: { integrationId?: string }) => channel?.integrationId)
+        .map((channel: { integrationId: string; channelPrice?: number; channelQuantity?: number; channelCurrency?: string }) => [
+          String(channel.integrationId),
+          {
+            channelPrice: channel.channelPrice,
+            channelQuantity: channel.channelQuantity,
+            channelCurrency: channel.channelCurrency,
+          },
+        ])
+    );
+
+    const results = await productService.publishToChannels(
+      productId,
+      integrationIds,
+      String(req.user?._id),
+      channelValues
+    );
+
+    return res.status(HTTP_STATUS.ACCEPTED).json(
+      new ApiResponse(
+        true,
+        `Publishing jobs enqueued for ${results.length} channel integration(s)`,
+        { enqueuedCount: results.length, results }
+      )
+    );
+  }
+);

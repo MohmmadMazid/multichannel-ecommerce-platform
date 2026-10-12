@@ -1,0 +1,170 @@
+import { Schema, model } from "mongoose";
+import { IProductMapping } from "./product-mapping.types";
+import { SyncStatus } from "../../shared/enums/sync-status.enum";
+
+const productMappingSchema = new Schema<IProductMapping>(
+  {
+    productId: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+    },
+
+    integrationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Integration",
+      required: true,
+    },
+
+    sku: {
+      type: String,
+      required: true,
+      trim: true,
+      uppercase: true,
+    },
+
+    externalProductId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    externalVariantId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    externalInventoryItemId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    externalSku: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+
+    channelPrice: {
+      type: Number,
+      min: 0,
+    },
+
+    channelQuantity: {
+      type: Number,
+      min: 0,
+    },
+
+    channelCurrency: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      minlength: 3,
+      maxlength: 3,
+    },
+
+    channelCategoryId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    channelCategoryName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    channelAspects: {
+      type: Schema.Types.Mixed,
+      default: undefined,
+    },
+
+    missingAspects: {
+      type: [String],
+      default: [],
+    },
+
+    shippingCost: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    platformFeePercentage: {
+      type: Number,
+      min: 0,
+    },
+
+    fixedFee: {
+      type: Number,
+      min: 0,
+    },
+
+    syncStatus: {
+
+      type: String,
+      enum: Object.values(SyncStatus),
+      default: SyncStatus.PENDING,
+    },
+
+    lastSyncedAt: {
+      type: Date,
+    },
+
+    lastSyncError: {
+      type: String,
+      default: "",
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Unique compound index: productId + integrationId (Guarantees 1 active mapping per Product + Integration pair)
+productMappingSchema.index(
+  { productId: 1, integrationId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      isDeleted: false,
+    },
+  }
+);
+
+// Normal index: sku
+productMappingSchema.index({ sku: 1 });
+
+// Unique compound index for external IDs: integrationId + externalProductId + externalVariantId
+// Uses partialFilterExpression to ignore pending mappings with empty externalProductId ("") and deleted mappings
+productMappingSchema.index(
+  { integrationId: 1, externalProductId: 1, externalVariantId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      externalProductId: { $gt: "" },
+      isDeleted: false,
+    },
+  }
+);
+
+const ProductMappingModel = model<IProductMapping>("ProductMapping", productMappingSchema);
+
+// Sync indexes to automatically update MongoDB index definitions
+ProductMappingModel.syncIndexes().catch(() => {});
+
+export default ProductMappingModel;

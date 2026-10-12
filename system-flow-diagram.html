@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MultiChannel Commerce - Complete System Flow Diagram</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg-canvas: #f2e5e5;
+      --card-bg: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border-color: #cbd5e1;
+      --primary: #2563eb;
+      --pink-border: #ec4899;
+      --teal-border: #10b981;
+      --cyan-border: #0284c7;
+      --amber-border: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid #e2e8f0;
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      z-index: 50;
+      flex-shrink: 0;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge-status {
+      background: #ecfdf5;
+      color: #059669;
+      border: 1px solid #a7f3d0;
+      padding: 2px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: 17px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .header-desc {
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    button {
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #334155;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease-in-out;
+    }
+
+    button:hover {
+      background: #f8fafc;
+      border-color: #94a3b8;
+      color: #0f172a;
+    }
+
+    button.primary {
+      background: #0f172a;
+      color: #ffffff;
+      border-color: #0f172a;
+    }
+
+    button.primary:hover {
+      background: #334155;
+    }
+
+    /* Diagram Stage & Viewport */
+    #diagram-stage {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--bg-canvas);
+      cursor: grab;
+      user-select: none;
+    }
+
+    #diagram-stage:active {
+      cursor: grabbing;
+    }
+
+    #pan-zoom-container {
+      transform-origin: center center;
+      transition: transform 0.05s ease-out;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      min-width: 100%;
+      min-height: 100%;
+    }
+
+    /* Floating Controls Overlay */
+    .floating-toolbar {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      z-index: 40;
+    }
+
+    .legend-panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 12px 16px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+      font-size: 12px;
+      z-index: 40;
+      max-width: 310px;
+      backdrop-filter: blur(6px);
+    }
+
+    .legend-title {
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: #0f172a;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: #334155;
+    }
+
+    .legend-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.2);
+      flex-shrink: 0;
+    }
+
+    .legend-divider {
+      height: 1px;
+      background: #e2e8f0;
+      margin: 8px 0;
+    }
+
+    /* Toast Notification */
+    #toast {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #0f172a;
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transition: all 0.25s ease;
+      z-index: 100;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+      pointer-events: none;
+    }
+
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    /* Modal for Mermaid Raw Code */
+    #code-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .modal-content {
+      background: #ffffff;
+      width: 880px;
+      max-width: 100%;
+      max-height: 85vh;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    .modal-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-body {
+      padding: 16px 20px;
+      overflow-y: auto;
+      flex: 1;
+      background: #0f172a;
+    }
+
+    .modal-body pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: #e2e8f0;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .modal-footer {
+      padding: 12px 20px;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: #f8fafc;
+    }
+
+    /* Flow Explanation Accordion */
+    .flow-drawer {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 12px 16px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+      font-size: 12px;
+      z-index: 40;
+      max-width: 320px;
+      backdrop-filter: blur(6px);
+    }
+
+    .flow-drawer-title {
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: #0f172a;
+    }
+
+    .flow-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      background: #e2e8f0;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 4px;
+    }
+
+    .mermaid {
+      opacity: 0;
+      transition: opacity 0.2s ease-in;
+    }
+
+    .mermaid[data-processed="true"] {
+      opacity: 1;
+    }
+
+    .mermaid svg {
+      max-width: 100%;
+      height: auto;
+      font-family: 'Inter', sans-serif !important;
+    }
+
+    .mermaid .edgeLabel {
+      background-color: #cbd5e1 !important;
+      padding: 2px 6px !important;
+      border-radius: 4px !important;
+      font-size: 11px !important;
+      font-family: 'JetBrains Mono', monospace !important;
+      color: #1e293b !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="header-left">
+      <h1>MultiChannel Commerce</h1>
+      <span class="badge-status">Complete System Architecture</span>
+      <span class="header-desc">Full End-to-End System Flow Diagram</span>
+    </div>
+    <div class="header-actions">
+      <button onclick="resetZoom()">Fit / Reset Zoom</button>
+      <button onclick="zoomIn()">Zoom +</button>
+      <button onclick="zoomOut()">Zoom -</button>
+      <button onclick="openModal()">View Mermaid Code</button>
+      <button onclick="copyMermaidCode()" class="primary">Copy for mermaid.live</button>
+    </div>
+  </header>
+
+  <!-- Diagram Canvas Area -->
+  <div id="diagram-stage">
+    
+    <!-- Legend -->
+    <div class="legend-panel">
+      <div class="legend-title">Architecture Subsystems</div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #fae8f5; border-color: #ec4899;"></div>
+        <span><strong>Frontend:</strong> Next.js 15 App Router</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #e6fffa; border-color: #10b981;"></div>
+        <span><strong>Backend:</strong> Node.js / Express 5 / TS</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #e0f2fe; border-color: #0284c7;"></div>
+        <span><strong>External:</strong> Shopify / eBay / Custom</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: #fef3c7; border-color: #f59e0b;"></div>
+        <span><strong>Data & Jobs:</strong> Redis / BullMQ / Mongo</span>
+      </div>
+      <div class="legend-divider"></div>
+      <div style="font-size: 11px; color: #64748b; line-height: 1.4;">
+        &bull; <strong>Scroll:</strong> Zoom in / out<br/>
+        &bull; <strong>Drag:</strong> Pan across canvas<br/>
+        &bull; <strong>Fit:</strong> Re-center the diagram
+      </div>
+    </div>
+
+    <!-- Key Flows Summary Box -->
+    <div class="flow-drawer">
+      <div class="flow-drawer-title">Key End-to-End Flows</div>
+      <div style="margin-bottom: 8px;">
+        <span class="flow-badge">1. Publish Flow</span>
+        <div style="color: #475569; font-size: 11px;">Forms &rarr; API Client &rarr; Auth &rarr; Sync Engine &rarr; BullMQ / Fallback &rarr; Shopify / eBay</div>
+      </div>
+      <div style="margin-bottom: 8px;">
+        <span class="flow-badge">2. Oversell Protection</span>
+        <div style="color: #475569; font-size: 11px;">Shopify Sale &rarr; HMAC Webhook &rarr; Webhook Verifier &rarr; Mongo Stock &rarr; Fan-Out sync to eBay</div>
+      </div>
+      <div>
+        <span class="flow-badge">3. Worker & Fallback</span>
+        <div style="color: #475569; font-size: 11px;">BullMQ Queue &rarr; Worker Daemon (Concurrency: 5) &bull; Auto Direct Fallback on Redis offline</div>
+      </div>
+    </div>
+
+    <!-- Zoomable Pan Container -->
+    <div id="pan-zoom-container">
+      <div class="mermaid" id="mermaid-root">
+flowchart TB
+    %% ===================================================
+    %% 1. FRONTEND LAYER (PINK CONTAINER)
+    %% ===================================================
+    subgraph Frontend["Frontend Layer (Next.js 15 App Router)"]
+        direction TB
+
+        subgraph FE_Inputs["UI Views and Form Components"]
+            direction LR
+            FE_Cache["TanStack Query Cache<br/>and Auto-Refetch"]
+            FE_Forms["Product and Integration Forms<br/>and Publish Modals"]
+            FE_Dash["Web Dashboard UI<br/>and Analytics Tables"]
+        end
+
+        FE_Client["Frontend API Client (Services)<br/>(Unified Axios / Fetch Client)"]
+
+        FE_Cache --> FE_Client
+        FE_Forms --> FE_Client
+        FE_Dash --> FE_Client
+    end
+
+    %% ===================================================
+    %% 2. BACKEND LAYER (TEAL CONTAINER)
+    %% ===================================================
+    subgraph Backend["Backend Layer (Node.js / Express / TypeScript)"]
+        direction TB
+
+        BE_Auth["JWT Authentication and Middleware<br/>(Bearer Token Scoping and Zod Schemas)"]
+        BE_WebhookCtrl["Webhook Controller and Verifier<br/>(HMAC-SHA256 and Race De-duplication)"]
+
+        subgraph BE_Services["Core Application Services"]
+            direction LR
+            BE_ProdSvc["Product Management Service<br/>(Master Catalog and Scoped SKU)"]
+            BE_MapSvc["Product Mapping Service<br/>(Price/Stock Overrides and Parity)"]
+            BE_OAuthSvc["OAuth and Integrations Service<br/>(Shopify Tokens and eBay Refresh)"]
+            BE_ImportSvc["CSV and Catalog Import Service<br/>(Bulk Stream Upsert Engine)"]
+            BE_Sync["Sync Engine and Connectors<br/>(Idempotency and Direct Fallback)"]
+        end
+
+        BE_Auth -- "Authorized Request" --> BE_ProdSvc
+        BE_Auth --> BE_MapSvc
+        BE_Auth --> BE_OAuthSvc
+        BE_Auth --> BE_ImportSvc
+        BE_Auth --> BE_Sync
+
+        BE_WebhookCtrl -- "Inventory Parity" --> BE_ProdSvc
+        BE_WebhookCtrl -- "Fan-Out Parity" --> BE_MapSvc
+        BE_WebhookCtrl -- "Sync Event" --> BE_Sync
+
+        BE_ProdSvc -- "Trigger Publish" --> BE_MapSvc
+        BE_MapSvc -- "Dispatch Sync Job" --> BE_Sync
+    end
+
+    %% ===================================================
+    %% 3. EXTERNAL SALES CHANNELS (CYAN CONTAINER)
+    %% ===================================================
+    subgraph Channels["External Sales Channels"]
+        direction TB
+        CH_Ebay["eBay Marketplace<br/>(REST and Inventory API, Offers, Taxonomy)"]
+        CH_Custom["Custom Website Channel<br/>(Direct REST Storefront and Webhooks)"]
+        CH_Shopify["Shopify Store<br/>(GraphQL Admin API 2026 and Webhooks)"]
+    end
+
+    %% ===================================================
+    %% 4. DATA & JOB INFRASTRUCTURE (ORANGE CONTAINER)
+    %% ===================================================
+    subgraph Infra["Data and Job Infrastructure"]
+        direction TB
+        INF_Queue[("Redis + BullMQ Queue<br/>(product-sync-queue and Retries)")]
+        INF_Worker["BullMQ Worker Daemon<br/>(Concurrency: 5 / Background)"]
+        INF_Mongo[("MongoDB Atlas Database<br/>(Products, Mappings, Integrations, Logs)")]
+
+        INF_Queue --> INF_Worker
+    end
+
+    %% Keep bottom two subgraphs side-by-side
+    Channels ~~~ Infra
+
+    %% ===================================================
+    %% CROSS-TIER DATA FLOW CONNECTIONS
+    %% ===================================================
+
+    %% Frontend to Backend
+    FE_Client -- "REST HTTP / JSON" --> BE_Auth
+
+    %% Backend to External Channels
+    BE_Sync -- "Inventory API and Offers" --> CH_Ebay
+    BE_Sync -- "Direct API" --> CH_Custom
+    BE_Sync -- "GraphQL Mutations" --> CH_Shopify
+    BE_OAuthSvc -- "OAuth 2.0 Auth and Refresh" --> CH_Shopify
+    BE_OAuthSvc -- "OAuth 2.0 Auth and Policies" --> CH_Ebay
+
+    %% Inbound Webhook: Shopify back to Backend
+    CH_Shopify -- "HTTP Webhook (HMAC-SHA256)" --> BE_WebhookCtrl
+
+    %% Backend to Data Infrastructure
+    BE_Sync -- "Enqueue Job" --> INF_Queue
+    BE_Sync -- "Direct Sync Fallback" --> INF_Mongo
+    BE_ProdSvc <--> INF_Mongo
+    BE_MapSvc <--> INF_Mongo
+    BE_OAuthSvc <--> INF_Mongo
+    BE_ImportSvc <--> INF_Mongo
+
+    %% Worker back to Sync Connectors
+    INF_Worker -- "Worker Processing (Execute Job)" --> BE_Sync
+
+    %% ===================================================
+    %% VISUAL STYLES MATCHING THE REFERENCE IMAGE
+    %% ===================================================
+    style Frontend fill:#fae8f5,stroke:#ec4899,stroke-width:2px
+    style Backend fill:#e6fffa,stroke:#10b981,stroke-width:2px
+    style Channels fill:#e0f2fe,stroke:#0284c7,stroke-width:2px
+    style Infra fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
+
+    style FE_Inputs fill:#ffffff,stroke:#f472b6,stroke-width:1px,stroke-dasharray: 3 3
+    style BE_Services fill:#ffffff,stroke:#2dd4bf,stroke-width:1px,stroke-dasharray: 3 3
+
+    classDef card fill:#ffffff,stroke:#1e293b,stroke-width:1.5px,rx:6px,ry:6px,color:#0f172a,font-size:13px;
+    classDef cylinder fill:#ffffff,stroke:#1e293b,stroke-width:1.5px,color:#0f172a,font-size:13px;
+
+    class FE_Cache,FE_Forms,FE_Dash,FE_Client card;
+    class BE_WebhookCtrl,BE_Auth,BE_Sync,BE_ProdSvc,BE_MapSvc,BE_OAuthSvc,BE_ImportSvc card;
+    class CH_Ebay,CH_Custom,CH_Shopify card;
+    class INF_Worker card;
+    class INF_Queue,INF_Mongo cylinder;
+      </div>
+    </div>
+
+    <!-- Floating Zoom Toolbar -->
+    <div class="floating-toolbar">
+      <button onclick="zoomIn()" title="Zoom In">+</button>
+      <button onclick="zoomOut()" title="Zoom Out">-</button>
+      <button onclick="resetZoom()" title="Reset Zoom">Fit</button>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast">Code copied to clipboard!</div>
+
+  <!-- Modal for Raw Mermaid Code -->
+  <div id="code-modal" onclick="closeModalOnBackdrop(event)">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 style="font-size: 15px; font-weight: 600;">Mermaid Flowchart Source Code (mermaid.live Ready)</h2>
+        <button onclick="closeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <pre id="modal-code-snippet"></pre>
+      </div>
+      <div class="modal-footer">
+        <button onclick="copyMermaidCode()" class="primary">Copy Code</button>
+        <button onclick="openMermaidLive()">Open mermaid.live &nearr;</button>
+        <button onclick="closeModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Initialize Mermaid
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'neutral',
+      flowchart: {
+        curve: 'basis',
+        useMaxWidth: false,
+        htmlLabels: true
+      },
+      securityLevel: 'loose'
+    });
+
+    // Pan & Zoom Implementation
+    let scale = 0.9;
+    let pointX = 0;
+    let pointY = 0;
+    let startX = 0;
+    let startY = 0;
+    let isPanning = false;
+
+    const stage = document.getElementById('diagram-stage');
+    const container = document.getElementById('pan-zoom-container');
+
+    function updateTransform() {
+      container.style.transform = `translate(${pointX}px, ${pointY}px) scale(${scale})`;
+    }
+
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = stage.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const xs = (mouseX - pointX) / scale;
+      const ys = (mouseY - pointY) / scale;
+      const delta = -e.deltaY;
+      
+      if (delta > 0) {
+        scale = Math.min(scale * 1.15, 3.5);
+      } else {
+        scale = Math.max(scale / 1.15, 0.35);
+      }
+      
+      pointX = mouseX - xs * scale;
+      pointY = mouseY - ys * scale;
+      updateTransform();
+    }, { passive: false });
+
+    stage.addEventListener('mousedown', (e) => {
+      if (e.target.closest('button') || e.target.closest('.legend-panel') || e.target.closest('.flow-drawer') || e.target.closest('.floating-toolbar')) return;
+      isPanning = true;
+      startX = e.clientX - pointX;
+      startY = e.clientY - pointY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isPanning) return;
+      pointX = e.clientX - startX;
+      pointY = e.clientY - startY;
+      updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      isPanning = false;
+    });
+
+    function zoomIn() {
+      scale = Math.min(scale * 1.25, 3.5);
+      updateTransform();
+    }
+
+    function zoomOut() {
+      scale = Math.max(scale / 1.25, 0.35);
+      updateTransform();
+    }
+
+    function resetZoom() {
+      scale = 0.88;
+      pointX = 0;
+      pointY = 0;
+      updateTransform();
+    }
+
+    // Modal & Clipboard Actions
+    function getCleanMermaidCode() {
+      const codeElement = document.getElementById('mermaid-root');
+      return codeElement ? codeElement.textContent.trim() : '';
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    function copyMermaidCode() {
+      const code = getCleanMermaidCode();
+      navigator.clipboard.writeText(code).then(() => {
+        showToast('Mermaid code copied to clipboard!');
+      }).catch(() => {
+        showToast('Unable to copy code directly.');
+      });
+    }
+
+    function openModal() {
+      const modal = document.getElementById('code-modal');
+      const snippet = document.getElementById('modal-code-snippet');
+      snippet.textContent = getCleanMermaidCode();
+      modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('code-modal').style.display = 'none';
+    }
+
+    function closeModalOnBackdrop(e) {
+      if (e.target.id === 'code-modal') closeModal();
+    }
+
+    function openMermaidLive() {
+      window.open('https://mermaid.live', '_blank');
+    }
+
+    // Auto-fit on load
+    window.addEventListener('load', () => {
+      setTimeout(resetZoom, 400);
+    });
+  </script>
+</body>
+</html>

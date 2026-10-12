@@ -1,0 +1,122 @@
+import mongoose, { Schema } from "mongoose";
+
+import { ProductStatus } from "../../shared/enums/product-status.enum";
+import { SyncStatus } from "../../shared/enums/sync-status.enum";
+import { Types } from "mongoose";
+
+const productSchema = new Schema(
+  {
+    userId: {
+      type: Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    sku: {
+      type: String,
+      required: true,
+      index: true,
+      trim: true,
+      uppercase: true,
+    },
+
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    description: {
+      type: String,
+      default: "",
+    },
+
+    brand: {
+      type: String,
+      default: "",
+    },
+
+    category: {
+      type: String,
+      default: "",
+    },
+
+    images: [
+      {
+        type: String,
+      },
+    ],
+
+    costPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    price: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+
+    currency: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      minlength: 3,
+      maxlength: 3,
+    },
+
+    quantity: {
+      type: Number,
+      required: true,
+      default: 0,
+      min: 0,
+    },
+
+    inventoryMode: {
+      type: String,
+      enum: ["INDEPENDENT", "SHARED"],
+      default: "INDEPENDENT",
+    },
+
+    shippingCharge: {
+
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    status: {
+      type: String,
+      enum: Object.values(ProductStatus),
+      default: ProductStatus.ACTIVE,
+    },
+
+    syncStatus: {
+      type: String,
+      enum: Object.values(SyncStatus),
+      default: SyncStatus.PENDING,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+productSchema.index(
+  { userId: 1, sku: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      isDeleted: false,
+    },
+  }
+);
+
+export default mongoose.model("Product", productSchema);

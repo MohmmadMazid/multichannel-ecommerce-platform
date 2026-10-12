@@ -1,0 +1,519 @@
+import { Types } from "mongoose";
+import Product from "../products/product.model";
+import Integration from "../integrations/integration.model";
+import ProductMapping from "../product-mappings/product-mapping.model";
+import SyncLog from "./sync.model";
+import { productSyncQueue } from "./sync.queue";
+import { ISyncJobPayload, SyncJobAction, SyncLogStatus } from "./sync.types";
+import { SyncStatus } from "../../shared/enums/sync-status.enum";
+import { Platform } from "../../shared/enums/platform.enum";
+import { ApiError } from "../../utils/ApiError";
+import { HTTP_STATUS } from "../../shared/constants/http-status.constants";
+import { SYNC_MESSAGES } from "./sync.messages";
+import { env } from "../../config/env";
+import { MarketplaceConnectorFactory } from "./connectors/connector.factory";
+import { resolveChannelPrice, resolveChannelQuantity } from "./channel-values";
+
+class SyncService {
+  private async executeDirectMarketplaceSync(
+    syncLogId: string,
+    productId: string,
+    productMappingId: string,
+    integrationId: string,
+    action: SyncJobAction
+  ) {
+    const mapping = await ProductMapping.findOne({ _id: productMappingId, isDeleted: false });
+    const product = await Product.findOne({
+      _id: productId,
+      ...(action === SyncJobAction.DELETE ? {} : { isDeleted: false }),
+    });
+    const integration = await Integration.findOne({ _id: integrationId });
+
+    if (!mapping || !product || !integration || !integration.isActive) {
+      await SyncLog.findByIdAndUpdate(syncLogId, {
+        status: SyncLogStatus.FAILED,
+        completedAt: new Date(),
+        error: "Direct sync could not resolve product, mapping, or active integration",
+      });
+      return { success: false, error: "Direct sync could not resolve product, mapping, or active integration" };
+    }
+
+    const connector = MarketplaceConnectorFactory.getConnector(integration.platform);
+    const syncPayload = {
+      sku: product.sku,
+      title: product.title,
+      description: product.description,
+      brand: product.brand,
+      category: product.category,
+      images: product.images,
+      price: resolveChannelPrice(mapping.channelPrice, product.price),
+      currency: mapping.channelCurrency || product.currency || undefined,
+      quantity: resolveChannelQuantity(mapping.channelQuantity, product.quantity),
+      shippingCharge: product.shippingCharge,
+      status: product.status,
+      externalProductId: mapping.externalProductId,
+      externalVariantId: mapping.externalVariantId,
+      externalInventoryItemId: mapping.externalInventoryItemId,
+      storeUrl: integration.storeUrl,
+      integrationId: integration._id.toString(),
+      channelCategoryId: mapping.channelCategoryId || undefined,
+      channelCategoryName: mapping.channelCategoryName || undefined,
+      channelAspects: mapping.channelAspects || undefined,
+      credentials: {
+        ...integration.credentials,
+        storeUrl: integration.storeUrl,
+        ...(mapping.channelCategoryId ? { categoryId: mapping.channelCategoryId } : {}),
+      },
+    };
+
+    let result;
+    if (action === SyncJobAction.CREATE) {
+      result = await connector.createProduct(syncPayload);
+    } else if (action === SyncJobAction.DELETE) {
+      result = await connector.deleteProduct(syncPayload);
+    } else {
+      result = await connector.updateProduct(syncPayload);
+    }
+
+    if (!result?.success) {
+      await SyncLog.findByIdAndUpdate(syncLogId, {
+        status: SyncLogStatus.FAILED,
+        completedAt: new Date(),
+        error: result?.error || "Marketplace sync failed",
+      });
+      await ProductMapping.findByIdAndUpdate(productMappingId, {
+        syncStatus: SyncStatus.FAILED,
+        lastSyncError: result?.error || "Marketplace sync failed",
+      });
+      return result;
+    }
+
+    const updateMappingData: Record<string, unknown> = {
+      lastSyncedAt: new Date(),
+      lastSyncError: "",
+    };
+
+    if (action === SyncJobAction.DELETE) {
+      updateMappingData.syncStatus = SyncStatus.UNPUBLISHED;
+      updateMappingData.externalProductId = "";
+      updateMappingData.externalVariantId = "";
+      updateMappingData.isActive = false;
+    } else {
+      updateMappingData.syncStatus = SyncStatus.SYNCED;
+      updateMappingData.isActive = true;
+      if (result.externalProductId) updateMappingData.externalProductId = result.externalProductId;
+      if (result.externalVariantId) updateMappingData.externalVariantId = result.externalVariantId;
+      if (result.externalInventoryItemId) updateMappingData.externalInventoryItemId = result.externalInventoryItemId;
+      if (result.externalSku) updateMappingData.externalSku = result.externalSku;
+    }
+
+    try {
+      await ProductMapping.findByIdAndUpdate(productMappingId, updateMappingData);
+    } catch (dupErr: any) {
+      if (dupErr.code === 11000 || String(dupErr?.message).includes("E11000")) {
+        // A webhook created an ephemeral mapping for this externalProductId right before our direct sync returned.
+        // Clean up any conflicting mapping and update this master mapping!
+        await ProductMapping.deleteMany({
+          _id: { $ne: productMappingId },
+          integrationId: integration._id,
+          externalProductId: result.externalProductId,
+        });
+        await ProductMapping.findByIdAndUpdate(productMappingId, updateMappingData);
+      } else {
+        throw dupErr;
+      }
+    }
+    await SyncLog.findByIdAndUpdate(syncLogId, {
+      status: SyncLogStatus.COMPLETED,
+      completedAt: new Date(),
+      error: "",
+    });
+
+    return result;
+  }
+  /**
+   * Enqueue a Sync Job for a given ProductMapping and Action
+   */
+  async enqueueSyncJob(productMappingId: string, action: SyncJobAction = SyncJobAction.UPDATE, userId?: string) {
+    // 1. Verify ProductMapping exists and is active
+    const mapping = await ProductMapping.findOne({
+      _id: productMappingId,
+      isDeleted: false,
+    });
+
+    if (!mapping) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, SYNC_MESSAGES.MAPPING_NOT_FOUND);
+    }
+
+    // 2. Verify master Product exists
+    const product = await Product.findOne({
+      _id: mapping.productId,
+      isDeleted: false,
+      ...(userId ? { userId } : {}),
+    });
+
+    if (!product) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, SYNC_MESSAGES.PRODUCT_NOT_FOUND);
+    }
+
+    // 3. Verify Integration exists and is active
+    const integration = await Integration.findOne({
+      _id: mapping.integrationId,
+      ...(userId ? { userId } : {}),
+    });
+
+    if (!integration || !integration.isActive) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, SYNC_MESSAGES.INTEGRATION_INACTIVE);
+    }
+
+    // Auto-resolve action: If action is UPDATE but externalProductId is missing or blank, execute CREATE!
+    let effectiveAction = action;
+    if (action === SyncJobAction.UPDATE && (!mapping.externalProductId || mapping.externalProductId.trim() === "")) {
+      effectiveAction = SyncJobAction.CREATE;
+    }
+
+    // 4. Idempotency Check: Prevent duplicate active jobs for the same ProductMapping + Action
+    const activeSyncLog = await SyncLog.findOne({
+      productMappingId: mapping._id,
+      action: effectiveAction,
+      status: { $in: [SyncLogStatus.PENDING, SyncLogStatus.PROCESSING] },
+    });
+
+    if (activeSyncLog) {
+      const isStale = (activeSyncLog as any).createdAt &&
+        (Date.now() - new Date((activeSyncLog as any).createdAt).getTime() > 60 * 1000);
+
+      if (isStale) {
+        // Automatically unblock stale / orphaned jobs older than 60 seconds
+        await SyncLog.findByIdAndUpdate(activeSyncLog._id, {
+          status: SyncLogStatus.FAILED,
+          completedAt: new Date(),
+          error: "Previous sync attempt timed out or was superseded",
+        });
+      } else {
+        throw new ApiError(HTTP_STATUS.CONFLICT, SYNC_MESSAGES.DUPLICATE_JOB);
+      }
+    }
+
+    // 5. Create new SyncLog audit record
+    const maxAttempts = env.SYNC_MAX_RETRIES || 3;
+    const syncLog = await SyncLog.create({
+      productId: product._id,
+      productMappingId: mapping._id,
+      integrationId: integration._id,
+      platform: integration.platform,
+      action: effectiveAction,
+      status: SyncLogStatus.PENDING,
+      attempts: 0,
+      maxAttempts,
+      error: "",
+    });
+
+    const jobPayload: ISyncJobPayload = {
+      syncLogId: syncLog._id.toString(),
+      productId: product._id.toString(),
+      productMappingId: mapping._id.toString(),
+      integrationId: integration._id.toString(),
+      action: effectiveAction,
+    };
+
+    // 6. Push job to BullMQ queue or fall back to direct execution when Redis is unavailable
+    if (!productSyncQueue) {
+      const result = await this.executeDirectMarketplaceSync(
+        syncLog._id.toString(),
+        product._id.toString(),
+        mapping._id.toString(),
+        integration._id.toString(),
+        effectiveAction
+      );
+
+      if (!result?.success) {
+        return {
+          syncLogId: syncLog._id,
+          jobId: `direct-sync:${syncLog._id}`,
+          status: SyncLogStatus.FAILED,
+          directFallback: true,
+          error: result?.error || "Direct marketplace sync failed",
+        };
+      }
+
+      return {
+        syncLogId: syncLog._id,
+        jobId: `direct-sync:${syncLog._id}`,
+        status: SyncLogStatus.COMPLETED,
+        directFallback: true,
+      };
+    }
+
+    try {
+      const job = await productSyncQueue.add("syncJob", jobPayload, {
+        jobId: syncLog._id.toString(),
+      });
+      console.log(
+        `Job queued ${job?.id || syncLog._id.toString()} platform=${integration.platform} action=${effectiveAction} syncLog=${syncLog._id.toString()}`
+      );
+
+      return {
+        syncLogId: syncLog._id,
+        jobId: job?.id || syncLog._id.toString(),
+        status: SyncLogStatus.PENDING,
+      };
+    } catch (queueErr: any) {
+      console.warn(`Redis queue failed (${queueErr?.message}). Falling back to direct marketplace sync.`);
+      const result = await this.executeDirectMarketplaceSync(
+        syncLog._id.toString(),
+        product._id.toString(),
+        mapping._id.toString(),
+        integration._id.toString(),
+        effectiveAction
+      );
+
+      return {
+        syncLogId: syncLog._id,
+        jobId: `direct-sync:${syncLog._id}`,
+        status: result?.success ? SyncLogStatus.COMPLETED : SyncLogStatus.FAILED,
+        directFallback: true,
+        error: result?.success ? undefined : (result?.error || "Direct marketplace sync failed"),
+      };
+    }
+  }
+
+  /**
+   * Enqueue Sync Jobs for ALL active, non-deleted ProductMappings belonging to a Master Product
+   */
+  async enqueueSyncJobsForProduct(
+    productId: string | Types.ObjectId,
+    action: SyncJobAction = SyncJobAction.UPDATE,
+    userId?: string
+  ) {
+    const targetId = new Types.ObjectId(productId.toString());
+
+    const activeMappings = await ProductMapping.find({
+      productId: targetId,
+      isActive: true,
+      isDeleted: false,
+    });
+
+    if (!activeMappings || activeMappings.length === 0) {
+      return [];
+    }
+
+    const results = [];
+
+    for (const mapping of activeMappings) {
+      try {
+        const res = await this.enqueueSyncJob(mapping._id.toString(), action, userId);
+        results.push(res);
+      } catch (err: any) {
+        const statusCode = err?.statusCode;
+        if (statusCode === HTTP_STATUS.CONFLICT || statusCode === HTTP_STATUS.BAD_REQUEST) {
+          console.warn(`Sync job skipped for mapping ${mapping._id.toString()}: ${err?.message || "not queued"}`);
+          continue;
+        }
+        console.error(`Sync job failed to queue for mapping ${mapping._id.toString()}: ${err?.message || "queue error"}`);
+        throw err;
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Get Dashboard Summary Metrics, Platform Statistics & Integration Health (Scoped by user)
+   */
+  async getDashboardSummary(userId?: string) {
+    const productQuery: Record<string, unknown> = { isDeleted: false };
+    const integrationQuery: Record<string, unknown> = { isActive: true };
+    if (userId) {
+      productQuery.userId = userId;
+      integrationQuery.userId = userId;
+    }
+
+    const activeIntegrations = await Integration.find(integrationQuery)
+      .select("_id platform storeName storeUrl isActive")
+      .sort({ platform: 1, storeName: 1 });
+    const userIntegrationIds = activeIntegrations.map((i) => i._id);
+
+    const mappingQuery: Record<string, unknown> = {
+      isDeleted: false,
+      ...(userId ? { integrationId: { $in: userIntegrationIds } } : {}),
+    };
+    const syncLogQuery: Record<string, unknown> = {
+      ...(userId ? { integrationId: { $in: userIntegrationIds } } : {}),
+    };
+
+    const [
+      totalMasterProducts,
+      totalConnectedIntegrations,
+      totalPublishedListings,
+      pendingSyncJobs,
+      processingSyncJobs,
+      completedSyncJobs,
+      failedSyncJobs,
+      unpublishedMappings,
+    ] = await Promise.all([
+      Product.countDocuments(productQuery),
+      Promise.resolve(activeIntegrations.length),
+      ProductMapping.countDocuments({ ...mappingQuery, isActive: true, syncStatus: SyncStatus.SYNCED }),
+      SyncLog.countDocuments({ ...syncLogQuery, status: SyncLogStatus.PENDING }),
+      SyncLog.countDocuments({ ...syncLogQuery, status: SyncLogStatus.PROCESSING }),
+      SyncLog.countDocuments({ ...syncLogQuery, status: SyncLogStatus.COMPLETED }),
+      SyncLog.countDocuments({ ...syncLogQuery, status: SyncLogStatus.FAILED }),
+      ProductMapping.countDocuments({ ...mappingQuery, $or: [{ isActive: false }, { syncStatus: SyncStatus.UNPUBLISHED }] }),
+    ]);
+
+    const totalFinishedJobs = completedSyncJobs + failedSyncJobs;
+    const syncSuccessRate = totalFinishedJobs > 0
+      ? Number(((completedSyncJobs / totalFinishedJobs) * 100).toFixed(1))
+      : 0;
+
+    // Platform statistics breakdown for SHOPIFY, EBAY, CUSTOM_WEBSITE
+    const platforms = [Platform.SHOPIFY, Platform.EBAY, Platform.CUSTOM_WEBSITE];
+    const platformStats = await Promise.all(
+      platforms.map(async (platform) => {
+        const platformIntegrations = activeIntegrations.filter((i) => i.platform === platform);
+        const integrationIds = platformIntegrations.map((i) => i._id);
+
+        const [
+          publishedMappings,
+          pendingJobs,
+          processingJobs,
+          completedJobs,
+          failedJobs,
+        ] = await Promise.all([
+          ProductMapping.countDocuments({ integrationId: { $in: integrationIds }, isDeleted: false, isActive: true, syncStatus: SyncStatus.SYNCED }),
+          SyncLog.countDocuments({ integrationId: { $in: integrationIds }, status: SyncLogStatus.PENDING }),
+          SyncLog.countDocuments({ integrationId: { $in: integrationIds }, status: SyncLogStatus.PROCESSING }),
+          SyncLog.countDocuments({ integrationId: { $in: integrationIds }, status: SyncLogStatus.COMPLETED }),
+          SyncLog.countDocuments({ integrationId: { $in: integrationIds }, status: SyncLogStatus.FAILED }),
+        ]);
+
+        return {
+          platform,
+          connectedIntegrations: platformIntegrations.length,
+          publishedMappings,
+          pendingJobs,
+          processingJobs,
+          completedJobs,
+          failedJobs,
+        };
+      })
+    );
+
+    return {
+      summaryMetrics: {
+        totalMasterProducts,
+        totalConnectedIntegrations,
+        totalPublishedListings,
+        pendingSyncJobs,
+        processingSyncJobs,
+        completedSyncJobs,
+        failedSyncJobs,
+        unpublishedMappings,
+        syncSuccessRate,
+      },
+      platformStats,
+      integrationsHealth: activeIntegrations,
+    };
+  }
+
+  /**
+   * Get Paginated Sync Logs with safe populated references (Credentials stripped, scoped by user)
+   */
+  async getSyncLogs(
+    page: number = 1,
+    limit: number = 20,
+    filters: {
+      status?: SyncLogStatus;
+      action?: SyncJobAction;
+      platform?: Platform;
+      integrationId?: string;
+      productMappingId?: string;
+      productId?: string;
+    } = {},
+    userId?: string
+  ) {
+    const skip = (page - 1) * limit;
+    const query: Record<string, unknown> = {};
+
+    if (filters.status) query.status = filters.status;
+    if (filters.action) query.action = filters.action;
+    if (filters.integrationId) query.integrationId = filters.integrationId;
+    if (filters.productMappingId) query.productMappingId = filters.productMappingId;
+    if (filters.productId) query.productId = filters.productId;
+
+    if (userId && !query.integrationId) {
+      const userIntegrations = await Integration.find({ userId }).select("_id");
+      query.integrationId = { $in: userIntegrations.map((i) => i._id) };
+    }
+
+    if (filters.platform) {
+      const platformIntegrations = await Integration.find({
+        platform: filters.platform,
+        ...(userId ? { userId } : {}),
+      }).select("_id");
+      query.integrationId = { $in: platformIntegrations.map((i) => i._id) };
+    }
+
+    const [logs, total] = await Promise.all([
+      SyncLog.find(query)
+        .populate("productId", "sku title")
+        .populate("integrationId", "platform storeName storeUrl")
+        .populate("productMappingId", "externalProductId externalVariantId externalSku syncStatus")
+        .skip(skip)
+        .limit(limit)
+        .sort({ createdAt: -1 }),
+
+      SyncLog.countDocuments(query),
+    ]);
+
+    return {
+      logs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Get single SyncLog details by ID
+   */
+  async getSyncLogById(id: string) {
+    const syncLog = await SyncLog.findById(id)
+      .populate("productId", "sku title description price quantity status")
+      .populate("integrationId", "platform storeName storeUrl")
+      .populate("productMappingId", "externalProductId externalVariantId externalSku syncStatus");
+
+    if (!syncLog) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, SYNC_MESSAGES.SYNC_LOG_NOT_FOUND);
+    }
+
+    return syncLog;
+  }
+
+  /**
+   * Retry a FAILED sync job by creating a new SyncLog and BullMQ job
+   */
+  async retrySyncJob(syncLogId: string) {
+    const existingLog = await SyncLog.findById(syncLogId);
+
+    if (!existingLog) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, SYNC_MESSAGES.SYNC_LOG_NOT_FOUND);
+    }
+
+    if (existingLog.status !== SyncLogStatus.FAILED) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, SYNC_MESSAGES.RETRY_ONLY_FAILED);
+    }
+
+    // Create a new execution attempt while preserving the original historical SyncLog
+    return this.enqueueSyncJob(
+      existingLog.productMappingId.toString(),
+      existingLog.action
+    );
+  }
+}
+
+export const syncService = new SyncService();
