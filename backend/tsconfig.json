@@ -1,22 +1,39 @@
+// {
+//   "compilerOptions": {
+//     "target": "ES2022",
+//     "module": "CommonJS",
+//     "rootDir": "./src",
+//     "outDir": "./dist",
+
+//     "strict": true,
+
+//     "esModuleInterop": true,
+
+//     "forceConsistentCasingInFileNames": true,
+
+//     "skipLibCheck": true,
+
+//     "resolveJsonModule": true
+//   },
+
+//   "include": ["src"],
+
+//   "exclude": ["node_modules", "dist"]
+// }
 {
   "compilerOptions": {
     "target": "ES2022",
     "module": "CommonJS",
+    "moduleResolution": "Node",
     "rootDir": "./src",
     "outDir": "./dist",
-
     "strict": true,
-
     "esModuleInterop": true,
-
     "forceConsistentCasingInFileNames": true,
-
     "skipLibCheck": true,
-
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": ["node"]
   },
-
   "include": ["src"],
-
   "exclude": ["node_modules", "dist"]
 }
